@@ -86,7 +86,7 @@ struct udphdr* is_udp(void *iph, u8 hdr_sz, void* data_end)
 {
 	struct udphdr *udph = NULL;
 	if (!iph || !data_end) return NULL;
-	if((void*)(iph + hdr_sz + sizeof(*udph)) > data_end) return NULL;
+	if((void*)((uint8_t*)iph + hdr_sz + sizeof(*udph)) > data_end) return NULL;
 	
 	int proto = -1;
 	if(hdr_sz == sizeof(struct iphdr)) {
@@ -98,7 +98,7 @@ struct udphdr* is_udp(void *iph, u8 hdr_sz, void* data_end)
 	}
 
 	if(proto == IPPROTO_UDP) {
-		udph = (struct udphdr*)((void*)iph + hdr_sz);
+		udph = (struct udphdr*)((uint8_t*)iph + hdr_sz);
 	}
 	return udph;
 }
@@ -107,7 +107,7 @@ struct tcphdr* is_tcp(void *iph, u8 hdr_sz, void* data_end)
 {
 	struct tcphdr *tcph = NULL;
 	if (!iph || !data_end) return NULL;
-	if((void*)(iph + hdr_sz + sizeof(*tcph)) > data_end) return NULL; //checks if the size is bigger
+	if((void*)((uint8_t*)iph + hdr_sz + sizeof(*tcph)) > data_end) return NULL; //checks if the size is bigger
 	
 	int proto = -1;
 	if(hdr_sz == sizeof(struct iphdr)) {
@@ -119,7 +119,7 @@ struct tcphdr* is_tcp(void *iph, u8 hdr_sz, void* data_end)
 	}
 
 	if(proto == IPPROTO_TCP) {
-		tcph = (struct tcphdr*)((void*)iph + hdr_sz);
+		tcph = (struct tcphdr*)((uint8_t*)iph + hdr_sz);
 	}
 	return tcph;
 }
@@ -165,9 +165,11 @@ int handle_egress( struct __sk_buff *skb)
 
 	if(iph) {
 		u8 hdr_sz = sizeof(*iph);
+    //struct tcphdr *tcph = is_tcp(iph, hdr_sz, data_end);
 		struct udphdr *udph = is_udp(iph, hdr_sz, data_end);
 		struct tcphdr *tcph = is_tcp(iph, hdr_sz, data_end);
-		
+
+
 		u32 daddr = iph->daddr;
 		if(tcph || udph) {
 			bpf_printk("dest ip is %08x", ntohl(daddr));
@@ -179,20 +181,21 @@ int handle_egress( struct __sk_buff *skb)
 		bpf_probe_read_kernel(&evt->ip.addr.ipv4_daddr, sizeof(evt->ip.addr.ipv4_daddr), &daddr);
 
 		if (tcph) {
-			bpf_printk("is tcp %d", ntohs(tcph->source));
-			bpf_printk(" %d\n", ntohs(tcph->dest));
+		  //bpf_printk("\nis tcp %d\n", ntohs(tcph->source));
+		  //bpf_printk(" %d\n", ntohs(tcph->dest));
 			
 			evt->ip.ipp = TCP_V4;
-			evt->ip.port = ntohs(tcph->dest);
+			//evt->ip.port = ntohs(tcph->dest);
 		} else if (udph) {
-			bpf_printk("is udp %d", ntohs(udph->source)); 
-			bpf_printk("  %d\n", ntohs(udph->dest));
+			//bpf_printk("is udp %d", ntohs(udph->source)); 
+			//bpf_printk("  %d\n", ntohs(udph->dest));
 
 			evt->ip.ipp = UDP_V4;
-			evt->ip.port = ntohs(udph->dest);
+		  evt->ip.port = ntohs(udph->dest);
 		}
 
-	} else if (iph6) {
+
+  } else if (iph6) {
 		u8 hdr_sz = sizeof(*iph6);
 		struct udphdr *udph = is_udp(iph6, hdr_sz, data_end);
 		struct tcphdr *tcph = is_tcp(iph6, hdr_sz, data_end);
@@ -207,11 +210,11 @@ int handle_egress( struct __sk_buff *skb)
 		bpf_probe_read_kernel(&evt->ip.addr.ipv6_daddr, sizeof(evt->ip.addr.ipv6_daddr), &iph6->daddr.in6_u.u6_addr8);
 
 		if (tcph) {
-			bpf_printk("is tcp %d", ntohs(tcph->source));
-			bpf_printk(" %d\n", ntohs(tcph->dest));
+			//bpf_printk("is tcp %d", ntohs(tcph->source));
+			//bpf_printk(" %d\n", ntohs(tcph->dest));
 			
 			evt->ip.ipp = TCP_V6;
-			evt->ip.port = ntohs(tcph->dest);
+			//evt->ip.port = ntohs(tcph->dest);
 		} else if (udph) {
 			bpf_printk("is udp %d", ntohs(udph->source)); 
 			bpf_printk("  %d\n", ntohs(udph->dest));
@@ -224,7 +227,7 @@ int handle_egress( struct __sk_buff *skb)
 		bpf_printk("arp");
 	}
 
-	rc = TC_ACT_SHOT;
+  rc = TC_ACT_SHOT;
 	if(evt->eth_type == ETH_P_ARP) rc = TC_ACT_OK;
 	bpf_printk("%d\n", evt->ip.port);
 
@@ -233,7 +236,7 @@ int handle_egress( struct __sk_buff *skb)
 		u16 *port;
 		u32 key = i;
 		port = bpf_map_lookup_elem(&ports, &key);
-		if(port && evt->ip.port == *port) {
+		if(port && evt->ip.port == *port && *port != 0) { //i need to remeber to maybe remove the last statement
 			rc = TC_ACT_OK;
 		}
 	}

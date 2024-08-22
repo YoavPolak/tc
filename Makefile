@@ -18,7 +18,7 @@ skel: bpf
 
 .PHONY: run
 run: $(APP)
-	sudo ./$(APP) 53 5355 80 443 22 50005 50008
+	sudo ./$(APP) 53 5355 80 443 22 50005 50007
 
 .PHONY: block
 block: $(APP)

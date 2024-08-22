@@ -86,7 +86,7 @@ struct udphdr* is_udp(void *iph, u8 hdr_sz, void* data_end)
 {
 	struct udphdr *udph = NULL;
 	if (!iph || !data_end) return NULL;
-	if((void*)(iph + hdr_sz + sizeof(*udph)) > data_end) return NULL;
+	if((void*)((uint8_t*)iph + hdr_sz + sizeof(*udph)) > data_end) return NULL;
 	
 	int proto = -1;
 	if(hdr_sz == sizeof(struct iphdr)) {
@@ -98,7 +98,7 @@ struct udphdr* is_udp(void *iph, u8 hdr_sz, void* data_end)
 	}
 
 	if(proto == IPPROTO_UDP) {
-		udph = (struct udphdr*)((void*)iph + hdr_sz);
+		udph = (struct udphdr*)((uint8_t*)iph + hdr_sz);
 	}
 	return udph;
 }
@@ -107,7 +107,7 @@ struct tcphdr* is_tcp(void *iph, u8 hdr_sz, void* data_end)
 {
 	struct tcphdr *tcph = NULL;
 	if (!iph || !data_end) return NULL;
-	if((void*)(iph + hdr_sz + sizeof(*tcph)) > data_end) return NULL; //checks if the size is bigger
+	if((void*)((uint8_t*)iph + hdr_sz + sizeof(*tcph)) > data_end) return NULL; //checks if the size is bigger
 	
 	int proto = -1;
 	if(hdr_sz == sizeof(struct iphdr)) {
@@ -119,7 +119,7 @@ struct tcphdr* is_tcp(void *iph, u8 hdr_sz, void* data_end)
 	}
 
 	if(proto == IPPROTO_TCP) {
-		tcph = (struct tcphdr*)((void*)iph + hdr_sz);
+		tcph = (struct tcphdr*)((uint8_t*)iph + hdr_sz);
 	}
 	return tcph;
 }
@@ -141,8 +141,10 @@ int handle_egress( struct __sk_buff *skb)
 	}
 
 	//reads the data from the socket buffer
-	void *data_end = (void *)(long)skb->data_end;
-	struct ethhdr *eth = (struct ethhdr*)(void*)(long)skb->data;
+	void *data_end = (void *)(unsigned long long)skb->data_end;
+  void *data = (void*)(unsigned long long)skb->data;
+  struct ethhdr *eth = data;
+  if((void*)(eth+1) > data_end) goto err;
 	struct iphdr *iph= is_ipv4(eth, data_end);
 	struct ipv6hdr *iph6 = is_ipv6(eth, data_end);
 	struct arphdr *arp = is_arp(eth, data_end);
@@ -162,13 +164,28 @@ int handle_egress( struct __sk_buff *skb)
 	bpf_printk("comm is: %s eth_type is 0x%04x", evt->comm,  evt->eth_type);
 
 
-
 	if(iph) {
-		u8 hdr_sz = sizeof(*iph);
-    struct tcphdr *tcph = is_tcp(iph, hdr_sz, data_end);
-		struct udphdr *udph = is_udp(iph, hdr_sz, data_end);
-		//struct tcphdr *tcph = is_tcp(iph, hdr_sz, data_end);
+	  //maybe to change so it will be in a function	
+    struct tcphdr *tcph = NULL;
+    struct udphdr *udph = NULL;
 
+    if(iph->protocol == IPPROTO_UDP) {
+      udph = (void*)(iph + 1);
+      if ((void*)(udph + 1) > data_end) goto err;
+      bpf_printk("is udp %d", ntohs(udph->source)); 
+			bpf_printk("  %d\n", ntohs(udph->dest));
+
+      evt->ip.ipp = UDP_V4;
+      evt->ip.port = ntohs(udph->dest);
+    } else if (iph->protocol == IPPROTO_TCP) {
+      tcph = (void*)(iph+1);
+      if((void*)(tcph + 1) > data_end) goto err;
+      bpf_printk("\nis tcp %d\n", ntohs(tcph->source));
+		  bpf_printk(" %d\n", ntohs(tcph->dest));
+
+      evt->ip.ipp = TCP_V4;
+      evt->ip.port = ntohs(tcph->dest);
+    }
 
 		u32 daddr = iph->daddr;
 		if(tcph || udph) {
@@ -179,49 +196,41 @@ int handle_egress( struct __sk_buff *skb)
 
 
 		bpf_probe_read_kernel(&evt->ip.addr.ipv4_daddr, sizeof(evt->ip.addr.ipv4_daddr), &daddr);
-
-		if (tcph) {
-		  //bpf_printk("\nis tcp %d\n", ntohs(tcph->source));
-		  //bpf_printk(" %d\n", ntohs(tcph->dest));
-			
-			evt->ip.ipp = TCP_V4;
-			evt->ip.port = ntohs(tcph->dest);
-		} else if (udph) {
-			//bpf_printk("is udp %d", ntohs(udph->source)); 
-			//bpf_printk("  %d\n", ntohs(udph->dest));
-
-			evt->ip.ipp = UDP_V4;
-		  //evt->ip.port = ntohs(udph->dest);
-		}
-
+    
 
   } else if (iph6) {
-		u8 hdr_sz = sizeof(*iph6);
-		struct udphdr *udph = is_udp(iph6, hdr_sz, data_end);
-		struct tcphdr *tcph = is_tcp(iph6, hdr_sz, data_end);
-		
+
+		struct udphdr *udph = NULL;
+		struct tcphdr *tcph = NULL;
+	
+    if(iph6->nexthdr == IPPROTO_UDP) {
+      udph = (void*)(iph6 + 1);
+      if ((void*)(udph + 1) > data_end) goto err;
+
+      bpf_printk("is udp %d", ntohs(udph->source)); 
+			bpf_printk("  %d\n", ntohs(udph->dest));
+
+      evt->ip.ipp = UDP_V4;
+      evt->ip.port = ntohs(udph->dest);
+    } else if (iph6->nexthdr == IPPROTO_TCP) {
+      tcph = (void*)(iph6+1);
+      if((void*)(tcph + 1) > data_end) goto err;
+
+      bpf_printk("\nis tcp %d\n", ntohs(tcph->source));
+		  bpf_printk(" %d\n", ntohs(tcph->dest));
+
+      evt->ip.ipp = TCP_V4;
+      evt->ip.port = ntohs(tcph->dest);
+    } else goto err;
+
 		if(tcph || udph) {
 			//TODO
 		} else {
 			goto err;
 		}
 
-
 		bpf_probe_read_kernel(&evt->ip.addr.ipv6_daddr, sizeof(evt->ip.addr.ipv6_daddr), &iph6->daddr.in6_u.u6_addr8);
 
-		if (tcph) {
-			//bpf_printk("is tcp %d", ntohs(tcph->source));
-			//bpf_printk(" %d\n", ntohs(tcph->dest));
-			
-			evt->ip.ipp = TCP_V6;
-			//evt->ip.port = ntohs(tcph->dest);
-		} else if (udph) {
-			bpf_printk("is udp %d", ntohs(udph->source)); 
-			bpf_printk("  %d\n", ntohs(udph->dest));
-
-			evt->ip.ipp = UDP_V6;
-			evt->ip.port = ntohs(udph->dest);
-		}	
 	} else if (arp) {
 		bpf_probe_read_kernel(&evt->arp, sizeof(evt->arp), arp);
 		bpf_printk("arp");
