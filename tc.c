@@ -180,13 +180,13 @@ int main(int argc, char **argv)
 	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .ifindex = LO_IFINDEX, .attach_point = BPF_TC_EGRESS);
 	DECLARE_LIBBPF_OPTS(bpf_tc_opts, opts, .handle = 1, .priority = 1);
 	bump_memlock_rlimit();  // Increase memory lock limit
-
+	
 	signal(SIGINT, sig_handler);  // Set up signal handlers for graceful exit
 	signal(SIGTERM, sig_handler);
-
+	
 	struct tc *skel = tc__open_and_load();  // Load the BPF program
 	skel->bss->my_pid = getpid();  // Set the current process ID in the BPF program
-
+	
 	// Configure and attach the BPF TC program to the egress hook
 	bpf_tc_hook_create(&hook);
 	hook.attach_point = BPF_TC_CUSTOM;
@@ -194,16 +194,16 @@ int main(int argc, char **argv)
 	opts.prog_fd = bpf_program__fd(skel->progs.handle_egress);
 	opts.prog_id = 0;
 	opts.flags = BPF_TC_F_REPLACE;
-
+	
 	bpf_tc_attach(&hook, &opts);
-
+	
 	// Add allowed ports from command-line arguments to the BPF map
 	int map_fd = bpf_map__fd(skel->maps.ports);
 	for (int i = 0; i < argc; i++) {
 		int port = atoi(argv[i]);
 		allow_port(map_fd, port);
 	}
-
+	
 	// Create a ring buffer for event handling
 	struct ring_buffer *rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_evt, NULL, NULL);
 	
@@ -211,11 +211,11 @@ int main(int argc, char **argv)
 	while (!exiting) {
 		ring_buffer__poll(rb, 1000);
 	}
-
+	
 	// Detach and destroy the BPF TC program
 	opts.flags = opts.prog_id = opts.prog_fd = 0;
-    int dtch = bpf_tc_detach(&hook, &opts);
-    int dstr = bpf_tc_hook_destroy(&hook);
+	int dtch = bpf_tc_detach(&hook, &opts);
+	int dstr = bpf_tc_hook_destroy(&hook);
 
     // Print the results of detach and destroy operations
     printf("%d -- %d\n", dtch, dstr);
